@@ -1,19 +1,26 @@
 const Discord = require('discord.js');
 const client = new Discord.Client();
-const prefix = 't!'; // change this to your preferred prefix
-
-// define a collection to hold the commands
+const prefix = '/'; // change this to your preferred prefix
+// define a collection to hold the commands and their descriptions
 const commands = new Discord.Collection();
-
-// add a command to the collection
 commands.set('table', {
   description: 'Displays a formatted table.',
-  usage: 't!table\n| Column 1 | Column 2 |\n|----------|----------|\n| Row 1, Column 1 | Row 1, Column 2 |\n| Row 2, Column 1 | Row 2, Column 2 |'
+  usage: '/table \n| Column 1 | Column 2 |\n|----------|----------|\n| Row 1, Column 1 | Row 1, Column 2 |\n| Row 2, Column 1 | Row 2, Column 2 |'
+});
+commands.set('create', {
+  description: 'Creates a table based on user prompts.',
+  usage: '/create'
+});
+commands.set('ping', {
+  description: 'Replies with a pong.',
+  usage: '/ping'
 });
 
 // listen for the ready event
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
+  // set the bot status to 'online'
+  client.user.setStatus('online');
 });
 
 // listen for the message event
@@ -29,49 +36,91 @@ client.on('message', async (message) => {
     message.channel.send(embed);
   } else if (command === 'table') {
     try {
-      const lines = commands.get(command).usage.split('\n');
-      const rows = lines.slice(1).map((line) => line.split('|').map((cell) => cell.trim()));
+      const lines = args.join(' ').split('\n');
+      const rows = lines.slice(1).map((line) => line.split('|').map((cell) => cell.trim()).filter((cell) => cell !== ''));
       const table = createTable(rows);
-      message.channel.send('`' + table + '`');
+      message.channel.send('```' + table + '```');
     } catch (error) {
       console.error(error);
-      message.reply('There was an error processing your request.');
+      message.reply('There was an error processing your request. Please check the table format and try again.');
     }
+  } else if (command === 'create') {
+    const collectedData = await collectData(message);
+    if (!collectedData) {
+      message.reply('The process has been cancelled.');
+      return;
+    }
+    const rows = collectedData.map((data) => Object.values(data));
+    const columns = Object.keys(collectedData[0]);
+    const table = createTable([columns, ...rows]);
+    message.channel.send('```' + table + '```');
+  } else if (command === 'ping') {
+    message.channel.send('Pong!');
   } else {
     message.channel.send('Invalid command.');
   }
 });
 
 // create a function to create a table from a list of arguments
-function createTable(args) {
-  const columnWidths = {};
-  for (const arg of args) {
-    const width = arg.length;
-    if (!columnWidths[columnWidths.length]) {
-      columnWidths[columnWidths.length] = width;
-    } else {
-      columnWidths[columnWidths.length] = Math.max(columnWidths[columnWidths.length], width);
-    }
+function createTable(rows) {
+  if (rows.length < 2) {
+    throw new Error('Invalid table format');
   }
-
-  const table = '';
-  for (const row of args) {
-    table += '|';
-    for (const cell of row) {
-      const width = columnWidths[columnWidths.length - 1];
-      const alignedCell = alignCell(cell, width);
-      table += ' '.repeat(width - cell.length) + alignedCell + '|';
-    }
-    table += '\n';
+  const expectedHeaderLine = '| Column 1 | Column 2 |';
+  if (rows[0].join(' | ') !== expectedHeaderLine) {
+    throw new Error('Invalid table format');
   }
-
-  return table;
+  const columnsWidth = getColumnsWidth(rows);
+  const separatorLine = `|${columnsWidth.map((width) => '-'.repeat(width + 2)).join('|')}|`;
+  const formattedRows = rows.map((row) =>
+    `|${row
+      .map((cell, i) => `${cell.padEnd(columnsWidth[i])} `)
+      .join('|')}|`
+  );
+  return [separatorLine, ...formattedRows, separatorLine].join('\n');
 }
 
-// create a function to align a cell to a certain width
-function alignCell(cell, width) {
-  const padding = width - cell.length;
-  return `${cell}${' '.repeat(padding)}`;
+// get maximum width of each column
+function getColumnsWidth(rows) {
+  const columnsCount = rows[0].length;
+  const widths = new Array(columnsCount).fill(0);
+  for (const row of rows) {
+    for (let i = 0; i < columnsCount; i++) {
+      widths[i] = Math.max(widths[i], row[i].length);
+    }
+  }
+  return widths;
+}
+
+// collect data from user prompts
+async function collectData(message) {
+  const prompts = ['Enter a value for Column 1:', 'Enter a value for Column 2:'];
+  const collectedData = [];
+  for (prompt of prompts) {
+    const response = await getUserInput(message, prompt);
+    if (!response) {
+      return null;
+    }
+    collectedData.push(response);
+  }
+  return collectedData;
+}
+
+// get a user's response to a prompt
+async function getUserInput(message, prompt) {
+  const filter = (response) => {
+    return response.author.id === message.author.id;
+  };
+  message.channel.send(prompt);
+  const response = await message.channel.awaitMessages(filter, { max: 1, time: 60000, errors: ['time'] })
+    .then((collected) => {
+      return collected.first().content;
+    })
+    .catch(() => {
+      message.reply('You did not provide a response in time. The process has been cancelled.');
+      return null;
+    });
+  return response;
 }
 
 client.login(MTA5ODIwNzE0NzEzNDgyNDUwOA.GwqDHG.N-7ywM7izAn3wSuYEeeEuIX7SSuMvzNunDtn6E);
